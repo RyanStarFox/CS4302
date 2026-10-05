@@ -25,15 +25,30 @@ y = -1.5 + 3.0 * i / (double)(H - 1)
 
 ```bash
 make
-make example
+make help
+make pixel
+make serial
+make static
+make dynamic
+make guided
+make check
 ```
 
-`example` 使用 8×5 的图和 3 个线程，高度不能被线程数整除。它会打印每个线程的 `pixels` 和 `iter_sum`。某个线程的 `pixels=0` 可以出现，只要三种调度的像素数之和都等于 `W * H`，并且 `match_*=1`。
+`make pixel` 只检查 `c = 0` 和 `c = 1`。`make serial` 只跑串行整图。三种调度各自一个目标，都会和串行结果逐像素比较，所以要先让 `make serial` 通过。`make check` 和 `make example` 会把三种调度一起测。
+
+默认是 8×5 的图和 3 个线程，高度不能被线程数整除。它会打印每个线程的 `pixels` 和 `iter_sum`。某个线程的 `pixels=0` 可以出现，只要像素数之和等于 `W * H`，并且 `match_*=1`。
+
+换规模：
+
+```bash
+make static THREADS=5
+make guided W=30 H=20 K=100 THREADS=6 REPS=1
+```
 
 ## 运行
 
 ```bash
-./mandelbrot example
+./mandelbrot example [pixel|serial|static|dynamic|guided|check] [threads]
 ./mandelbrot <serial|static|dynamic|guided|check> <W> <H> <K> <threads> [reps]
 ```
 

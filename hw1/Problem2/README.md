@@ -16,10 +16,24 @@
 
 ```bash
 make
-make example
+make help
+make init
+make serial
+make parallel
+make check
 ```
 
-`make example` 会跑 `N=3/4`、`T=1/2`，并对照下面这张 `N=4, T=1` 的网格。最后一轮变化是 25。
+`make init` 只检查边界。`make serial` 和 `make parallel` 各自只测一种迭代，默认跑 `N=3/4`、`T=1/2` 这四个已知例子。有标准答案时，并行版不要求串行版已经写完。`make check` 和 `make example` 会把两种放在一起对拍。
+
+换规模：
+
+```bash
+make serial N=64 T=20 THREADS=4 REPS=1
+```
+
+没有已知答案的规模，`make parallel` 会和串行结果比较。
+
+`N=4, T=1` 的网格如下。最后一轮变化是 25。
 
 ```text
 0 100 100 0
@@ -33,7 +47,8 @@ make example
 ## 运行
 
 ```bash
-./heat example
+./heat example [init|serial|parallel|check] [threads]
+./heat init <N>
 ./heat <serial|parallel|check> <N> <T> <threads> [reps]
 ```
 

@@ -10,7 +10,7 @@
  * 第 0 行是上边界。内部点的 i、j 都从 1 到 n - 2。
  * 计时只包住 iterate_*。初始化在计时外面。
  *
- * 用法见 README.md。先运行 make example。
+ * 用法见 README.md。写完一个版本就可以 make init、make serial 或 make parallel。
  */
 
 #include <omp.h>
@@ -35,14 +35,19 @@ static const double GRID_TOL = 1e-8;
 [[noreturn]] static void usage() {
     std::cerr
         << "用法:\n"
-        << "  ./heat example [threads]\n"
+        << "  ./heat example [init|serial|parallel|check] [threads]\n"
+        << "  ./heat init <N>\n"
         << "  ./heat <serial|parallel|check> <N> <T> <threads> [reps]\n"
         << "\n"
         << "  N       网格边长，N >= 3\n"
         << "  T       迭代次数，T >= 1，必须刚好做 T 轮\n"
         << "  threads 并行线程数；串行版会忽略它，但命令行仍要写\n"
         << "  reps    默认 3，输出中位数\n"
-        << "  example 检查 N=3/4、T=1/2，并对照作业里的 4x4 一例\n";
+        << "  init     只检查初始边界，不跑迭代\n"
+        << "  serial   只跑串行迭代。N=3/4、T=1/2 时对照已知网格\n"
+        << "  parallel 只跑并行迭代。有已知网格时不要求串行版已写完\n"
+        << "  check    串行和并行对拍，并给出加速比\n"
+        << "  example  可只测一种实现。默认 check，覆盖 N=3/4、T=1/2\n";
     std::exit(1);
 }
 
@@ -172,7 +177,7 @@ static bool approx(double a, double b) {
     return std::fabs(a - b) <= GRID_TOL;
 }
 
-static bool check_known(const KnownCase &k, const double *grid, double delta) {
+static bool check_known(const KnownCase &k, const char *who, const double *grid, double delta) {
     const size_t cells = static_cast<size_t>(k.n) * static_cast<size_t>(k.n);
     bool grid_ok = true;
     for (size_t i = 0; i < cells; i++) {
@@ -182,8 +187,8 @@ static bool check_known(const KnownCase &k, const double *grid, double delta) {
         }
     }
     const bool delta_ok = approx(delta, k.delta);
-    std::cout << "known_" << k.name << "_grid=" << (grid_ok ? "ok" : "fail") << '\n';
-    std::cout << "known_" << k.name << "_delta=" << (delta_ok ? "ok" : "fail")
+    std::cout << who << "_known_" << k.name << "_grid=" << (grid_ok ? "ok" : "fail") << '\n';
+    std::cout << who << "_known_" << k.name << "_delta=" << (delta_ok ? "ok" : "fail")
               << " expect=" << k.delta << " got=" << delta << '\n';
     if (!grid_ok) {
         print_grid("期望网格:", k.grid, k.n);
@@ -282,10 +287,37 @@ static void print_times(const char *name, const std::array<double, MAX_REPS> &sa
     std::cout.unsetf(std::ios::fixed);
 }
 
+static bool plate_moved(const double *grid, int n) {
+    std::vector<double> fresh = new_grid(n);
+    init_plate(fresh, n);
+    return grid_max_abs_diff(fresh.data(), grid, n) > GRID_TOL;
+}
+
+static bool check_result(const char *who, const double *grid, double delta, int n, int steps, int &ok) {
+    if (grid == nullptr) {
+        std::cout << "hint_" << who << "=没有设置最终网格指针\n";
+        ok = 0;
+        return false;
+    }
+    if (!plate_moved(grid, n)) {
+        std::cout << "hint_" << who << "=最终网格仍是初值，内部点没有被迭代更新\n";
+        ok = 0;
+        return false;
+    }
+    const KnownCase *known = lookup_known(n, steps);
+    if (known != nullptr && !check_known(*known, who, grid, delta)) {
+        std::cout << "hint_" << who << "=网格或最后一轮 delta 与已知例子不一致\n";
+        ok = 0;
+        return false;
+    }
+    return true;
+}
+
 static int run_case(const std::string &mode, int n, int steps, int threads, int reps, bool show_grid) {
-    const bool want_serial_time = mode == "serial" || mode == "check";
-    const bool want_parallel_time = mode == "parallel" || mode == "check";
-    const bool want_diff = mode == "parallel" || mode == "check";
+    const bool known_parallel = mode == "parallel" && lookup_known(n, steps) != nullptr;
+    const bool want_serial = mode == "serial" || mode == "check" || (mode == "parallel" && !known_parallel);
+    const bool want_parallel = mode == "parallel" || mode == "check";
+    const bool want_diff = mode == "check" || (mode == "parallel" && !known_parallel);
 
     std::cout << "problem=2\n"
               << "mode=" << mode << '\n'
@@ -312,22 +344,20 @@ static int run_case(const std::string &mode, int n, int steps, int threads, int 
     double serial_delta = 0.0;
     double parallel_delta = 0.0;
 
-    if (want_serial_time || want_diff) {
-        const int serial_reps = want_serial_time ? reps : 1;
+    if (want_serial) {
+        const int serial_reps = (mode == "serial" || mode == "check") ? reps : 1;
         time_serial(sa, sb, n, steps, serial_reps, serial_samples, serial_median, serial_final,
                     serial_delta);
-        if (want_serial_time) {
+        if (mode == "serial" || mode == "check") {
             print_times("serial", serial_samples, serial_reps, serial_median);
         }
         std::cout << "serial_final_delta=" << serial_delta << '\n';
-        if (serial_final == nullptr) {
-            std::cout << "hint_serial=没有设置最终网格指针\n";
-        } else if (show_grid && n <= 8) {
+        if (serial_final != nullptr && show_grid && n <= 8) {
             print_grid("serial_grid:", serial_final, n);
         }
     }
 
-    if (want_parallel_time) {
+    if (want_parallel) {
         time_parallel(pa, pb, n, steps, threads, reps, parallel_samples, parallel_median,
                       parallel_final, parallel_delta);
         print_times("parallel", parallel_samples, reps, parallel_median);
@@ -338,30 +368,15 @@ static int run_case(const std::string &mode, int n, int steps, int threads, int 
     }
 
     int ok = 1;
-    bool serial_moved = false;
-    if (serial_final != nullptr) {
-        std::vector<double> fresh = new_grid(n);
-        init_plate(fresh, n);
-        serial_moved = grid_max_abs_diff(fresh.data(), serial_final, n) > GRID_TOL;
-        if (!serial_moved) {
-            ok = 0;
-            std::cout << "hint_serial=最终网格仍是初值，内部点没有被迭代更新\n";
-        }
+    if (want_serial) {
+        check_result("serial", serial_final, serial_delta, n, steps, ok);
     }
-
-    const KnownCase *known = lookup_known(n, steps);
-    if (known != nullptr && serial_final != nullptr) {
-        if (!check_known(*known, serial_final, serial_delta)) {
-            ok = 0;
-            std::cout << "hint=先改 TODO(init) 和 TODO(serial)\n";
-        }
+    if (want_parallel) {
+        check_result("parallel", parallel_final, parallel_delta, n, steps, ok);
     }
 
     if (want_diff) {
-        if (serial_final == nullptr || parallel_final == nullptr) {
-            std::cout << "max_abs_diff=na\n";
-            ok = 0;
-        } else if (!serial_moved) {
+        if (ok == 0) {
             std::cout << "max_abs_diff=na\n";
             std::cout << "diff_ok=na\n";
         } else {
@@ -398,7 +413,50 @@ static int run_case(const std::string &mode, int n, int steps, int threads, int 
     return ok ? 0 : 1;
 }
 
-static int run_example(int threads) {
+static int run_init_case(int n) {
+    std::cout << "===== init: N=" << n << " =====\n";
+    std::vector<double> grid = new_grid(n);
+    init_plate(grid, n);
+    bool ok = true;
+    int reported = 0;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            const double expect = (i == 0 && j > 0 && j + 1 < n) ? 100.0 : 0.0;
+            const double got =
+                grid[static_cast<size_t>(i) * static_cast<size_t>(n) + static_cast<size_t>(j)];
+            if (!approx(got, expect)) {
+                ok = false;
+                if (reported < 4) {
+                    std::cout << "init_mismatch i=" << i << " j=" << j << " expect=" << expect
+                              << " got=" << got << '\n';
+                    reported++;
+                }
+            }
+        }
+    }
+    std::cout << "init_ok=" << (ok ? 1 : 0) << '\n';
+    if (!ok) {
+        std::cout << "hint_init=上边界中间应为 100，四个角和其他位置应为 0\n";
+        if (n <= 8) {
+            print_grid("init_grid:", grid.data(), n);
+        }
+    }
+    std::cout << "result=" << (ok ? "ok" : "fail") << '\n';
+    return ok ? 0 : 1;
+}
+
+static int run_init_suite() {
+    int status = 0;
+    status |= run_init_case(3);
+    std::cout << '\n';
+    status |= run_init_case(4);
+    return status == 0 ? 0 : 1;
+}
+
+static int run_example(const std::string &mode, int threads) {
+    if (mode == "init") {
+        return run_init_suite();
+    }
     const struct {
         int n;
         int steps;
@@ -410,9 +468,9 @@ static int run_example(int threads) {
     };
     int status = 0;
     for (const auto &c : cases) {
-        std::cout << "===== example: N=" << c.n << " T=" << c.steps << " threads=" << threads
-                  << " =====\n";
-        status |= run_case("check", c.n, c.steps, threads, 1, true);
+        std::cout << "===== example: N=" << c.n << " T=" << c.steps << " mode=" << mode
+                  << " threads=" << threads << " =====\n";
+        status |= run_case(mode, c.n, c.steps, threads, 1, true);
         std::cout << '\n';
     }
     return status == 0 ? 0 : 1;
@@ -420,14 +478,32 @@ static int run_example(int threads) {
 
 int main(int argc, char **argv) {
     if (argc >= 2 && std::string(argv[1]) == "example") {
-        if (argc > 3) {
+        std::string mode = "check";
+        int threads = 3;
+        int idx = 2;
+        if (idx < argc) {
+            const std::string arg = argv[idx];
+            if (arg == "init" || arg == "serial" || arg == "parallel" || arg == "check") {
+                mode = arg;
+                idx++;
+            }
+        }
+        if (idx < argc) {
+            threads = static_cast<int>(parse_long(argv[idx], "threads", 1, MAX_THREADS));
+            idx++;
+        }
+        if (idx != argc) {
             usage();
         }
-        int threads = 3;
-        if (argc == 3) {
-            threads = static_cast<int>(parse_long(argv[2], "threads", 1, MAX_THREADS));
+        return run_example(mode, threads);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "init") {
+        if (argc != 3) {
+            usage();
         }
-        return run_example(threads);
+        const int n = static_cast<int>(parse_long(argv[2], "N", 3, 4000));
+        return run_init_case(n);
     }
 
     if (argc < 5 || argc > 6) {

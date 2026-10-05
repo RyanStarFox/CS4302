@@ -12,8 +12,23 @@
 
 ```bash
 make
-make example
+make help
+make serial
+make atomic
+make private
+make check
 ```
+
+`make serial`、`make atomic`、`make private` 各自只测一种实现，用的是作业里的 8 个像素和长度为 1 的数组，对照标准答案。atomic 和 private 不要求另外两种已经写完。`make check` 和 `make example` 会把三种放在一起对拍。
+
+换线程数或换规模：
+
+```bash
+make serial THREADS=4
+make atomic N=100000 THREADS=4 DIST=uniform REPS=1
+```
+
+指定 `N` 时没有逐项标准答案，atomic 和 private 会与串行结果比较，所以串行版要先正确。`DIST` 可以是 `uniform` 或 `constant`。
 
 macOS 自带的 clang 没有 OpenMP。本目录的 Makefile 在检测到 Homebrew LLVM 时会改用它。Linux 上一般直接 `make` 即可。
 
@@ -29,7 +44,7 @@ make CXXFLAGS="-O0 -g -std=c++17 -Wall -Wextra -fopenmp"
 ## 运行
 
 ```bash
-./histogram example
+./histogram example [serial|atomic|private|check] [threads]
 ./histogram <serial|atomic|private|check> <N> <threads> <uniform|constant> [seed] [reps]
 ```
 

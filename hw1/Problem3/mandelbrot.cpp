@@ -12,7 +12,7 @@
  * 每个并行迭代计算完整的一行，这样三种调度的工作单位相同。
  * 计时只包住 compute_*。坐标公式和像素函数都算在计算里面。
  *
- * 用法见 README.md。先运行 make example。
+ * 用法见 README.md。写完一个版本就可以 make pixel、make serial、make static 等。
  */
 
 #include <omp.h>
@@ -41,15 +41,18 @@ using ComputeFn = void (*)(int, int, int, int, std::vector<int> &, std::vector<T
 [[noreturn]] static void usage() {
     std::cerr
         << "用法:\n"
-        << "  ./mandelbrot example [threads]\n"
+        << "  ./mandelbrot example [pixel|serial|static|dynamic|guided|check] [threads]\n"
         << "  ./mandelbrot <serial|static|dynamic|guided|check> <W> <H> <K> <threads> [reps]\n"
         << "\n"
         << "  W, H    图像宽和高，都 >= 2\n"
         << "  K       每个像素最多迭代次数，K >= 1\n"
         << "  threads 并行线程数\n"
         << "  reps    默认 3，输出中位数\n"
-        << "  check   三种调度都与串行版逐像素比较，并打印每个线程的工作量\n"
-        << "  example 先检查 c=0 和 c=1，再用一个高度不能被线程数整除的小图对拍\n";
+        << "  pixel   只检查 c=0 和 c=1\n"
+        << "  serial  只跑串行整图\n"
+        << "  static/dynamic/guided  只跑一种调度，并与串行结果比较\n"
+        << "  check   三种调度都与串行版逐像素比较，并打印加速比\n"
+        << "  example 默认 check。可改成上面任意一种，小图高度不能被线程数整除\n";
     std::exit(1);
 }
 
@@ -360,30 +363,47 @@ static int run_case(const std::string &mode, int w, int h, int k, int threads, i
     return ok ? 0 : 1;
 }
 
-static int run_example(int threads) {
+static int run_example(const std::string &mode, int threads) {
+    if (mode == "pixel") {
+        std::cout << "===== pixel: c=0 与 c=1，K=100 =====\n";
+        const bool ok = self_check_pixel(100);
+        std::cout << "result=" << (ok ? "ok" : "fail") << '\n';
+        return ok ? 0 : 1;
+    }
     const int w = 8;
     const int h = 5;
     const int k = 100;
-    std::cout << "===== example: 单像素，以及 " << w << "x" << h
-              << " 小图（高度不能被 " << threads << " 整除）=====\n";
+    std::cout << "===== example: " << w << "x" << h << " 小图，mode=" << mode
+              << "（高度不能被 " << threads << " 整除）=====\n";
     if (h % threads == 0) {
         std::cerr << "example 希望高度不能被线程数整除。当前 H=" << h << ", threads=" << threads
-                  << "。\n换一个不能整除的线程数，例如 ./mandelbrot example 3\n";
+                  << "。\n换一个不能整除的线程数，例如 ./mandelbrot example " << mode << " 3\n";
         return 1;
     }
-    return run_case("check", w, h, k, threads, 1, true);
+    return run_case(mode, w, h, k, threads, 1, true);
 }
 
 int main(int argc, char **argv) {
     if (argc >= 2 && std::string(argv[1]) == "example") {
-        if (argc > 3) {
+        std::string mode = "check";
+        int threads = 3;
+        int idx = 2;
+        if (idx < argc) {
+            const std::string arg = argv[idx];
+            if (arg == "pixel" || arg == "serial" || arg == "static" || arg == "dynamic" ||
+                arg == "guided" || arg == "check") {
+                mode = arg;
+                idx++;
+            }
+        }
+        if (idx < argc) {
+            threads = static_cast<int>(parse_long(argv[idx], "threads", 1, MAX_THREADS));
+            idx++;
+        }
+        if (idx != argc) {
             usage();
         }
-        int threads = 3;
-        if (argc == 3) {
-            threads = static_cast<int>(parse_long(argv[2], "threads", 1, MAX_THREADS));
-        }
-        return run_example(threads);
+        return run_example(mode, threads);
     }
 
     if (argc < 6 || argc > 7) {

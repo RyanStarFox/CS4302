@@ -9,7 +9,7 @@
  * 参数解析、造数据、计时、与串行结果对拍都已经接好。
  * 计时只包住你的函数。造数据和对拍在计时外面。
  *
- * 用法见 README.md。先运行 make example。
+ * 用法见 README.md。写完一个版本就可以 make serial、make atomic 或 make private。
  */
 
 #include <omp.h>
@@ -51,14 +51,14 @@ struct HistRun {
 [[noreturn]] static void usage() {
     std::cerr
         << "用法:\n"
-        << "  ./histogram example [threads]\n"
+        << "  ./histogram example [serial|atomic|private|check] [threads]\n"
         << "  ./histogram <serial|atomic|private|check> <N> <threads> <uniform|constant> [seed] [reps]\n"
         << "\n"
-        << "  example   作业中的小例子，以及长度为 1 的边界\n"
-        << "  serial    只跑串行版并计时\n"
-        << "  atomic    共享直方图版本，并与串行版对拍\n"
-        << "  private   线程私有直方图版本，并与串行版对拍\n"
-        << "  check     三个版本用同一次输入计时，并给出加速比\n"
+        << "  example   作业中的小例子，以及长度为 1 的边界。可只测一种实现\n"
+        << "  serial    只跑串行版。小例子对照标准答案；指定 N 时检查计数和\n"
+        << "  atomic    只跑共享直方图。小例子对照标准答案，不要求串行版已写完\n"
+        << "  private   只跑线程私有版。小例子对照标准答案，不要求串行版已写完\n"
+        << "  check     三个版本用同一次输入对拍，并给出加速比\n"
         << "  uniform   每个像素在 0..255 上均匀随机，种子固定\n"
         << "  constant  每个像素都是 128\n"
         << "  seed      默认 1；reps 默认 3，输出中位数\n";
@@ -124,10 +124,6 @@ static uint64_t hist_sum(const std::vector<uint64_t> &hist) {
     return sum;
 }
 
-static bool hist_equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b) {
-    return a == b;
-}
-
 static int first_mismatch(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b) {
     const int n = static_cast<int>(std::min(a.size(), b.size()));
     for (int v = 0; v < n; v++) {
@@ -158,6 +154,7 @@ static void histogram_serial(const std::vector<uint8_t> &pixels, std::vector<uin
      * hist[v] = 像素值等于 v 的个数，v = 0..255。
      * 计数器用 64 位整数。先把 256 个计数清零，再遍历 pixels。
      */
+
 }
 
 static void histogram_atomic(const std::vector<uint8_t> &pixels, std::vector<uint64_t> &hist,
@@ -247,14 +244,45 @@ static void report_match(const char *name, const HistRun &got, const std::vector
     }
 }
 
+static void report_sum(const char *name, const std::vector<uint64_t> &hist, size_t n, int &ok) {
+    const uint64_t sum = hist_sum(hist);
+    const bool sum_ok = sum == n;
+    std::cout << name << "_sum=" << sum << '\n';
+    if (std::string(name) == "serial") {
+        std::cout << "sum_ok=" << (sum_ok ? 1 : 0) << '\n';
+    } else {
+        std::cout << name << "_sum_ok=" << (sum_ok ? 1 : 0) << '\n';
+    }
+    if (!sum_ok) {
+        ok = 0;
+        if (hist_all_zero(hist)) {
+            std::cout << "hint_" << name << "=直方图仍全是 0，请先完成对应的 TODO\n";
+        }
+    }
+}
+
+static void report_expect(const char *name, const std::vector<uint64_t> &got,
+                          const std::vector<uint64_t> &expect, int &ok) {
+    const int bin = first_mismatch(got, expect);
+    const bool match = bin < 0;
+    std::cout << "example_" << name << "_match=" << (match ? 1 : 0) << '\n';
+    if (!match) {
+        ok = 0;
+        std::cout << "example_mismatch_" << name << "_bin=" << bin << " expect=" << expect[bin]
+                  << " got=" << got[bin] << '\n';
+    }
+}
+
 static int run_case(const std::string &mode, const std::vector<uint8_t> &pixels, int threads,
                     const std::string &dist, uint32_t seed, int reps,
                     const std::vector<uint64_t> *expect) {
-    const bool want_serial = mode == "serial" || mode == "check";
+    const bool solo_oracle = expect != nullptr && mode != "check" && mode != "serial";
+    const bool want_serial = mode == "serial" || mode == "check" ||
+                             ((mode == "atomic" || mode == "private") && !solo_oracle);
     const bool want_atomic = mode == "atomic" || mode == "check";
     const bool want_private = mode == "private" || mode == "check";
-    const bool compare_atomic = mode == "atomic" || mode == "check";
-    const bool compare_private = mode == "private" || mode == "check";
+    const bool compare_atomic = mode == "check" || (mode == "atomic" && !solo_oracle);
+    const bool compare_private = mode == "check" || (mode == "private" && !solo_oracle);
     const size_t n = pixels.size();
 
     std::cout << "problem=1\n"
@@ -274,9 +302,10 @@ static int run_case(const std::string &mode, const std::vector<uint8_t> &pixels,
     HistRun atomic_run;
     HistRun private_run;
 
-    if (want_serial || compare_atomic || compare_private || expect != nullptr) {
-        run_timed(serial_adapter, pixels, threads, want_serial ? reps : 1, serial_run);
-        if (want_serial) {
+    if (want_serial) {
+        const int serial_reps = (mode == "serial" || mode == "check") ? reps : 1;
+        run_timed(serial_adapter, pixels, threads, serial_reps, serial_run);
+        if (mode == "serial" || mode == "check") {
             print_times("serial", serial_run);
         }
     }
@@ -290,27 +319,19 @@ static int run_case(const std::string &mode, const std::vector<uint8_t> &pixels,
     }
 
     int ok = 1;
-    if (serial_run.hist.empty()) {
-        serial_run.hist.assign(HIST_BINS, 0);
-    }
-    const uint64_t serial_sum = hist_sum(serial_run.hist);
-    std::cout << "serial_sum=" << serial_sum << '\n';
-    std::cout << "sum_ok=" << (serial_sum == n ? 1 : 0) << '\n';
-    if (serial_sum != n) {
-        ok = 0;
-        if (hist_all_zero(serial_run.hist)) {
-            std::cout << "hint_serial=串行直方图仍全是 0，请先完成 TODO(serial)\n";
+    if (want_serial) {
+        report_sum("serial", serial_run.hist, n, ok);
+        if (expect != nullptr && (mode == "serial" || mode == "check")) {
+            report_expect("serial", serial_run.hist, *expect, ok);
         }
     }
-
-    if (expect != nullptr && !hist_equal(serial_run.hist, *expect)) {
-        ok = 0;
-        const int bin = first_mismatch(serial_run.hist, *expect);
-        std::cout << "example_serial_match=0\n";
-        std::cout << "example_mismatch_bin=" << bin << " expect=" << (*expect)[bin]
-                  << " got=" << serial_run.hist[bin] << '\n';
-    } else if (expect != nullptr) {
-        std::cout << "example_serial_match=1\n";
+    if (solo_oracle && want_atomic) {
+        report_sum("atomic", atomic_run.hist, n, ok);
+        report_expect("atomic", atomic_run.hist, *expect, ok);
+    }
+    if (solo_oracle && want_private) {
+        report_sum("private", private_run.hist, n, ok);
+        report_expect("private", private_run.hist, *expect, ok);
     }
 
     if (compare_atomic) {
@@ -342,7 +363,7 @@ static int run_case(const std::string &mode, const std::vector<uint8_t> &pixels,
     return ok ? 0 : 1;
 }
 
-static int run_example(int threads) {
+static int run_example(const std::string &mode, int threads) {
     int status = 0;
 
     const std::vector<uint8_t> sample = {0, 1, 1, 2, 2, 2, 255, 255};
@@ -352,28 +373,39 @@ static int run_example(int threads) {
     expect[2] = 3;
     expect[255] = 2;
 
-    std::cout << "===== example: 作业给出的 8 个像素，threads=" << threads << " =====\n";
-    status |= run_case("check", sample, threads, "given", 0, 1, &expect);
+    std::cout << "===== example: 作业给出的 8 个像素，mode=" << mode << " threads=" << threads
+              << " =====\n";
+    status |= run_case(mode, sample, threads, "given", 0, 1, &expect);
 
     const std::vector<uint8_t> one = {42};
     std::vector<uint64_t> expect_one(HIST_BINS, 0);
     expect_one[42] = 1;
 
     std::cout << "\n===== example: 长度为 1 =====\n";
-    status |= run_case("check", one, threads, "given", 0, 1, &expect_one);
+    status |= run_case(mode, one, threads, "given", 0, 1, &expect_one);
     return status == 0 ? 0 : 1;
 }
 
 int main(int argc, char **argv) {
     if (argc >= 2 && std::string(argv[1]) == "example") {
-        if (argc > 3) {
+        std::string mode = "check";
+        int threads = 3;
+        int idx = 2;
+        if (idx < argc) {
+            const std::string arg = argv[idx];
+            if (arg == "serial" || arg == "atomic" || arg == "private" || arg == "check") {
+                mode = arg;
+                idx++;
+            }
+        }
+        if (idx < argc) {
+            threads = static_cast<int>(parse_long(argv[idx], "threads", 1, MAX_THREADS));
+            idx++;
+        }
+        if (idx != argc) {
             usage();
         }
-        int threads = 3;
-        if (argc == 3) {
-            threads = static_cast<int>(parse_long(argv[2], "threads", 1, MAX_THREADS));
-        }
-        return run_example(threads);
+        return run_example(mode, threads);
     }
 
     if (argc < 5 || argc > 7) {
