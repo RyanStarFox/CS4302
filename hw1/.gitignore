@@ -1,0 +1,10 @@
+# make 生成的可执行文件
+Problem1/histogram
+Problem2/heat
+Problem3/mandelbrot
+
+# 其他编译产物
+*.o
+*.obj
+*.dSYM/
+a.out
