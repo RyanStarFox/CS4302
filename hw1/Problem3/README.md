@@ -1,6 +1,6 @@
 # 问题 3：Mandelbrot 与 OpenMP 调度
 
-在 `mandelbrot.c` 里搜索 `TODO`，只填这五处：
+在 `mandelbrot.cpp` 里搜索 `TODO`，只填这五处：
 
 1. `TODO(pixel)`：单个点的迭代次数
 2. `TODO(serial)`：按行计算整张图，统计写入 `stats[0]`

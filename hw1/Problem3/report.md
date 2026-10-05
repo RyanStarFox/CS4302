@@ -9,7 +9,7 @@
 sysctl -n machdep.cpu.brand_string
 sysctl -n hw.physicalcpu
 sysctl -n hw.logicalcpu
-gcc --version
+c++ --version
 ```
 
 | 项目 | 记录 |
@@ -18,7 +18,7 @@ gcc --version
 | 物理核心数 | |
 | 逻辑处理器数 / `omp_procs` | |
 | 编译器及版本 | |
-| 编译选项 | `-O2 -std=c11 -Wall -Wextra -fopenmp` |
+| 编译选项 | `-O2 -std=c++17 -Wall -Wextra -fopenmp` |
 | 计时方式 | 每个配置至少 3 次，取中位数。加速比分母是串行实现 |
 
 ## 2. 正确性

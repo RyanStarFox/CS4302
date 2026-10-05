@@ -1,6 +1,6 @@
 # 问题 1：灰度直方图
 
-在 `histogram.c` 里搜索 `TODO`，只填这三处：
+在 `histogram.cpp` 里搜索 `TODO`，只填这三处：
 
 1. `TODO(serial)`：串行直方图
 2. `TODO(atomic)`：所有线程更新同一份 `hist`，计数器用 `atomic`
@@ -21,7 +21,7 @@ macOS 自带的 clang 没有 OpenMP。本目录的 Makefile 在检测到 Homebre
 
 ```bash
 make clean
-make CFLAGS="-O0 -g -std=c11 -Wall -Wextra -fopenmp"
+make CXXFLAGS="-O0 -g -std=c++17 -Wall -Wextra -fopenmp"
 ```
 
 交作业和做性能实验时改回默认的 `-O2`。串行和并行在同一个程序里，优化等级是一样的。
