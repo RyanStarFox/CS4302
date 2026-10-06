@@ -154,7 +154,10 @@ static void histogram_serial(const std::vector<uint8_t> &pixels, std::vector<uin
      * hist[v] = 像素值等于 v 的个数，v = 0..255。
      * 计数器用 64 位整数。先把 256 个计数清零，再遍历 pixels。
      */
-
+    for (size_t i = 0; i < HIST_BINS; i++) hist[i]=0;
+    for (size_t i = 0; i < pixels.size(); i++){
+        hist[pixels[i]]++;
+    }
 }
 
 static void histogram_atomic(const std::vector<uint8_t> &pixels, std::vector<uint64_t> &hist,
@@ -168,6 +171,15 @@ static void histogram_atomic(const std::vector<uint8_t> &pixels, std::vector<uin
      * 3. hist[pixels[i]]++ 必须放在 atomic 里。多个线程会写同一个 bin。
      * 不要用 critical 把整个循环包起来。
      */
+    #pragma omp parallel for
+    for (size_t i = 0; i < HIST_BINS; i++){
+        hist[i] = 0;
+    }
+    #pragma omp parallel for
+    for (size_t i=0; i < pixels.size(); i++){
+        #pragma omp atomic
+        hist[pixels[i]]++;
+    }
 }
 
 static void histogram_private(const std::vector<uint8_t> &pixels, std::vector<uint64_t> &hist,
@@ -183,6 +195,32 @@ static void histogram_private(const std::vector<uint8_t> &pixels, std::vector<ui
      * 3. 输入处理完之后，再把各线程的局部直方图加进 hist。
      * 局部直方图的分配、清零和最后的合并都要留在这个函数里，因为它们计入时间。
      */
+    #pragma omp parallel for
+    for (size_t i = 0; i < hist.size(); i++){
+        hist[i] = 0;
+    }
+
+    std::vector<std::array<uint64_t, HIST_BINS>> locals(threads);
+
+    #pragma omp parallel num_threads(threads)
+    {
+        std::array<uint64_t, HIST_BINS> local{};
+        int tid = omp_get_thread_num();
+
+        #pragma omp for
+        for (long i = 0; i < static_cast<long>(pixels.size()); i++) {
+            local[pixels[i]]++;
+        }
+
+        locals[tid] = local;
+    }
+
+    #pragma omp parallel for
+    for (size_t i = 0; i < HIST_BINS; i++){
+        for (int j=0; j < threads; j++){
+            hist[i] += locals[j][i];
+        }
+    }
 }
 
 static void serial_adapter(const std::vector<uint8_t> &pixels, std::vector<uint64_t> &hist,

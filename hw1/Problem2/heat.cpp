@@ -120,6 +120,8 @@ static void init_plate(std::vector<double> &grid, int n) {
      * 每次调用 init_plate 之前，主程序都会把整块缓冲清零。
      * 你至少要把温度应为 100 的那些边界写上。内部点保持 0 即可。
      */
+    #pragma omp parallel for
+    for (int i = 1; i < n-1; i++) grid[i] = 100;
 }
 
 static double iterate_serial(std::vector<double> &buf_a, std::vector<double> &buf_b, int n, int steps,
@@ -142,8 +144,23 @@ static double iterate_serial(std::vector<double> &buf_a, std::vector<double> &bu
      *   double *tmp = current; current = next; next = tmp;
      *   final_grid = current;
      */
-    final_grid = buf_a.data();
-    return 0.0;
+    double delta;
+    double *current = buf_a.data();
+    double *next = buf_b.data();
+    for(int s = 0; s < steps; s++){
+        delta = 0;
+        for(int i = 1; i < n-1; i++){
+            for(int j = 1; j < n-1; j++){
+                next[i*n+j] = 0.25 * (current[(i-1)*n+j] + current[(i+1)*n+j] + current[i*n+(j+1)] + current[i*n+(j-1)]);
+                double c_delta = abs(next[i*n+j] - current[i*n+j]);
+                delta = delta>c_delta?delta:c_delta;
+            }
+        }
+        double *tmp = current; current = next; next = tmp;
+    }
+
+    final_grid = current;
+    return delta;
 }
 
 static double iterate_parallel(std::vector<double> &buf_a, std::vector<double> &buf_b, int n,
@@ -161,8 +178,26 @@ static double iterate_parallel(std::vector<double> &buf_a, std::vector<double> &
      * 返回最后一轮的 delta，并设置 final_grid。
      * 哪一次同步是必须的，写进报告第 3 题，不要只在代码里留一个说不清的 barrier。
      */
-    final_grid = buf_a.data();
-    return 0.0;
+    double delta;
+    double *current = buf_a.data();
+    double *next = buf_b.data();
+
+    for(int s = 0; s < steps; s++){
+        delta = 0;
+        #pragma omp parallel for collapse(2) num_threads(threads) reduction(max:delta)
+        for (int i = 1; i < n - 1; i++) {
+            for (int j = 1; j < n - 1; j++) {
+                double updated = 0.25 * (current[(i - 1) * n + j] + current[(i + 1) * n + j]
+                                    + current[i * n + (j - 1)] + current[i * n + (j + 1)]);
+                next[i * n + j] = updated;
+                delta = std::max(delta, std::fabs(updated - current[i * n + j]));
+            }
+        }
+        double *tmp = current; current = next; next = tmp;
+    }
+
+    final_grid = current;
+    return delta;
 }
 
 struct KnownCase {

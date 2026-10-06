@@ -98,7 +98,17 @@ static int pixel_iterations(double x, double y, int k) {
      * 作业给出的两个点：c = 0 时应返回 k；c = 1 且 k >= 3 时应返回 3。
      * 还没写的时候保持 return -1，主程序会直接停下来。
      */
-    return -1;
+    int n = 0;
+    double a = 0, b = 0;
+    double a_new = 0, b_new = 0;
+    while(n < k && a*a + b*b <= 4){
+        n++;
+        a_new = a*a - b*b + x;
+        b_new = 2*a*b + y;
+        a = a_new;
+        b = b_new;
+    }
+    return n;
 }
 
 static void compute_serial(int w, int h, int k, std::vector<int> &out, std::vector<ThreadStat> &stats) {
@@ -115,6 +125,16 @@ static void compute_serial(int w, int h, int k, std::vector<int> &out, std::vect
      * stats[0].pixels 是像素总数，stats[0].iter_sum 是所有像素迭代次数之和。
      * 用 long，不要用 int 做 iter_sum。
      */
+    for(int i = 0; i < h; i++){
+        for(int j = 0; j < w; j++){
+            double x = -2 + 3.0 * j / static_cast<double>(w - 1);
+            double y = -1.5 + 3.0 * i / static_cast<double>(h - 1);
+            int result = pixel_iterations(x,y,k);
+            out[static_cast<long>(i) * w + j] = result;
+            stats[0].iter_sum += result;
+        }
+    }
+    stats[0].pixels = static_cast<long>(w) * h;
 }
 
 static void compute_static(int w, int h, int k, int threads, std::vector<int> &out,
@@ -131,6 +151,25 @@ static void compute_static(int w, int h, int k, int threads, std::vector<int> &o
      * 每个线程用私有变量累加自己处理的像素数和迭代次数之和，
      * 再写入 stats[omp_get_thread_num()]。每个线程只写自己的槽位。
      */
+    #pragma omp parallel num_threads(threads)
+    {
+        long pixels = 0;
+        long iter_sum = 0;
+        #pragma omp for schedule(static)
+        for (int i = 0; i < h; i++) {
+            for (int j = 0; j < w; j++) {
+                double x = -2 + 3.0 * j / static_cast<double>(w - 1);
+                double y = -1.5 + 3.0 * i / static_cast<double>(h - 1);
+                int result = pixel_iterations(x, y, k);
+                out[static_cast<long>(i) * w + j] = result;
+                pixels++;
+                iter_sum += result;
+            }
+        }
+        int tid = omp_get_thread_num();
+        stats[tid].pixels = pixels;
+        stats[tid].iter_sum = iter_sum;
+    }
 }
 
 static void compute_dynamic(int w, int h, int k, int threads, std::vector<int> &out,
@@ -144,6 +183,25 @@ static void compute_dynamic(int w, int h, int k, int threads, std::vector<int> &
     /* TODO(dynamic)
      * 与 static 相同，但 schedule(dynamic, 1)：每次分发 1 行。
      */
+    #pragma omp parallel num_threads(threads)
+    {
+        long pixels = 0;
+        long iter_sum = 0;
+        #pragma omp for schedule(dynamic, 1)
+        for (int i = 0; i < h; i++) {
+            for (int j = 0; j < w; j++) {
+                double x = -2 + 3.0 * j / static_cast<double>(w - 1);
+                double y = -1.5 + 3.0 * i / static_cast<double>(h - 1);
+                int result = pixel_iterations(x, y, k);
+                out[static_cast<long>(i) * w + j] = result;
+                pixels++;
+                iter_sum += result;
+            }
+        }
+        int tid = omp_get_thread_num();
+        stats[tid].pixels = pixels;
+        stats[tid].iter_sum = iter_sum;
+    }
 }
 
 static void compute_guided(int w, int h, int k, int threads, std::vector<int> &out,
@@ -157,6 +215,25 @@ static void compute_guided(int w, int h, int k, int threads, std::vector<int> &o
     /* TODO(guided)
      * 与 static 相同，但 schedule(guided, 1)：最小块大小是 1 行。
      */
+    #pragma omp parallel num_threads(threads)
+    {
+        long pixels = 0;
+        long iter_sum = 0;
+        #pragma omp for schedule(guided, 1)
+        for (int i = 0; i < h; i++) {
+            for (int j = 0; j < w; j++) {
+                double x = -2 + 3.0 * j / static_cast<double>(w - 1);
+                double y = -1.5 + 3.0 * i / static_cast<double>(h - 1);
+                int result = pixel_iterations(x, y, k);
+                out[static_cast<long>(i) * w + j] = result;
+                pixels++;
+                iter_sum += result;
+            }
+        }
+        int tid = omp_get_thread_num();
+        stats[tid].pixels = pixels;
+        stats[tid].iter_sum = iter_sum;
+    }
 }
 
 static bool self_check_pixel(int k) {
